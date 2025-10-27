@@ -13,8 +13,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import ast
 
-import streamlit as st
-
 def check_password():
     """Returns `True` if the user entered the correct password."""
     def password_entered():
