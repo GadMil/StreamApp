@@ -13,34 +13,34 @@ import pandas as pd
 import plotly.graph_objects as go
 import ast
 
-def check_password():
-    """Returns `True` if the user entered the correct password."""
-    def password_entered():
-        if st.session_state["password"] == st.secrets["PASSWORD"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store the password
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.text_input(
-            "Enter password", type="password", on_change=password_entered, key="password"
-        )
-        return False
-    elif not st.session_state["password_correct"]:
-        st.text_input(
-            "Enter password", type="password", on_change=password_entered, key="password"
-        )
-        st.error("❌ Password incorrect")
-        return False
-    else:
-        return True
-
-
-if not check_password():
-    st.stop()
-
-st.write("✅ Access granted!")
+# def check_password():
+#     """Returns `True` if the user entered the correct password."""
+#     def password_entered():
+#         if st.session_state["password"] == st.secrets["PASSWORD"]:
+#             st.session_state["password_correct"] = True
+#             del st.session_state["password"]  # don't store the password
+#         else:
+#             st.session_state["password_correct"] = False
+#
+#     if "password_correct" not in st.session_state:
+#         st.text_input(
+#             "Enter password", type="password", on_change=password_entered, key="password"
+#         )
+#         return False
+#     elif not st.session_state["password_correct"]:
+#         st.text_input(
+#             "Enter password", type="password", on_change=password_entered, key="password"
+#         )
+#         st.error("❌ Password incorrect")
+#         return False
+#     else:
+#         return True
+#
+#
+# if not check_password():
+#     st.stop()
+#
+# st.write("✅ Access granted!")
 
 
 def show_price_chart(prices, days):
