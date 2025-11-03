@@ -9,6 +9,7 @@ Original file is located at
 
 # app.py
 import streamlit as st
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import ast
@@ -98,6 +99,25 @@ max_input = st.sidebar.number_input(
     step=10,
 )
 
+stocks_df['Volume_TH'] = (stocks_df['Volume']).astype(float) / 1e3  # in thousands of shares
+
+# Use percentiles for saner defaults (avoids huge outliers)
+vol_min_default = int(np.nanpercentile(stocks_df['Volume_TH'], 1))
+vol_max_default = int(np.nanpercentile(stocks_df['Volume_TH'], 99))
+
+min_vol_th = st.sidebar.number_input(
+    "Min Volume (Thousands of Shares)",
+    value=vol_min_default,
+    min_value=0,
+    step=1,
+)
+max_vol_th = st.sidebar.number_input(
+    "Max Volume (Thousands of Shares)",
+    value=vol_max_default,
+    min_value=min_vol_th,
+    step=1,
+)
+
 min_rev_growth_val = stocks_df['Revenue Growth YoY'].min(skipna=True) * 100
 min_rev_growth = st.sidebar.number_input(
     "Minimum Revenue Growth YoY (%)",
@@ -125,6 +145,7 @@ filtered = stocks_df[
     (stocks_df['Mentions'] >= min_mentions) &
     (stocks_df['Unique Mentions'] >= min_unique_mentions) &
     (stocks_df['MarketCap_M'].between(min_input, max_input)) &
+    (stocks_df['Volume_TH'].fillna(0).between(min_vol_th, max_vol_th)) &
     (stocks_df["Revenue Growth YoY"] >= min_rev_growth/100) &
     (stocks_df["Profit Margin"] >= min_margin/100)
 ]
@@ -139,13 +160,14 @@ sorted_df["Discount"] = sorted_df["discount"] * 100
 
 st.dataframe(
     sorted_df[
-        ['Symbol', 'Mentions', 'Unique Mentions', 'Sector', 'MarketCap_M', 'Target Price Change %', 'Discount']
+        ['Symbol', 'Mentions', 'Unique Mentions', 'Sector', 'MarketCap_M', "Volume_TH", 'Target Price Change %', 'Discount']
     ].reset_index(drop=True),
     use_container_width=True,
     column_config={
         "MarketCap_M": st.column_config.NumberColumn(
-            "Market Cap (Million USD)", format="%d"
+            "Market Cap (M$)", format="%d"
         ),
+        "Volume_TH": st.column_config.NumberColumn("Volume (Thousands)", format="%d"),
         "Target Price Change %": st.column_config.NumberColumn("TP Change %", format="%.1f%%"),
         "Discount": st.column_config.NumberColumn(format="%.1f%%")
     }
@@ -165,7 +187,7 @@ if selected_stock:
     st.write(f"**Sector:** {row['Sector']}")
     st.write(f"**Mentions:** {row['Mentions']} (Unique: {row['Unique Mentions']})")
     st.write(f"**% Change Since 1st Mention:** {row['%Change']:.2f}%")
-    st.write(f"**Market Cap:** ${row['MarketCap']:.2e}")
+    st.write(f"**Market Cap (Million USD):** ${row['MarketCap_M']:.2e}")
     st.write(f"**SP Entrance Potential:** {row['SP_Potential']}/5")
     st.write(f"**% Analysts Price Target Change (Week-Week)):** {row['Target Price Change %']:.2f}%")
 
