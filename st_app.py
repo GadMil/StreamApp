@@ -78,8 +78,8 @@ st.title("📈 FinTweet-Based Stock Ranking UI")
 
 # --- Sidebar Filters ---
 st.sidebar.header("Filter Options")
-min_mentions = st.sidebar.slider("Minimum Mentions", 1, 10, 2)
-min_unique_mentions = st.sidebar.slider("Minimum Unique Mentions", 1, 10, 2)
+min_mentions = st.sidebar.slider("Minimum Mentions", 1, 10, 1)
+min_unique_mentions = st.sidebar.slider("Minimum Unique Mentions", 1, 10, 1)
 
 stocks_df['MarketCap_M'] = stocks_df['MarketCap'] / 1e6
 
@@ -180,14 +180,14 @@ if selected_stock:
 
     st.markdown("#### 🔗 External Links")
     st.markdown(
-        f"[📊 Yahoo Finance Analysis for {selected_stock}](https://finance.yahoo.com/quote/{selected_stock.split('$')[1]}/analyst-insights)",
+        f"[📊 Yahoo Finance Analysis for {selected_stock}](https://finance.yahoo.com/quote/{selected_stock.split('$')[1]}/)",
         unsafe_allow_html=True)
 
     st.markdown(f"### Details for {selected_stock}")
     st.write(f"**Sector:** {row['Sector']}")
     st.write(f"**Mentions:** {row['Mentions']} (Unique: {row['Unique Mentions']})")
     st.write(f"**% Change Since 1st Mention:** {row['%Change']:.2f}%")
-    st.write(f"**Market Cap (Million USD):** ${row['MarketCap_M']:.2e}")
+    st.write(f"**Market Cap (Million USD):** ${row['MarketCap_M']:,.2f}")
     st.write(f"**SP Entrance Potential:** {row['SP_Potential']}/5")
     st.write(f"**% Analysts Price Target Change (Week-Week)):** {row['Target Price Change %']:.2f}%")
 
