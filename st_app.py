@@ -187,10 +187,10 @@ if selected_stock:
     st.write(f"**Sector:** {row['Sector']}")
     # st.write(f"**Mentions:** {row['Mentions']} (Unique: {row['Unique Mentions']})")
     # st.write(f"**% Change Since 1st Mention:** {row['%Change']:.2f}%")
-    st.write(f"**Market Cap:** ${row['MarketCap']:,.2f}")
+    st.write(f"**Market Cap (Millions):** ${int(row['MarketCap_M']):,}")
     # st.write(f"**SP Entrance Potential:** {row['SP_Potential']}/5")
     st.write(f"**% Analysts Price Target Change (Week Over Week):** {row['Target Price Change %']:.2f}%")
-    st.write(f"**Average Volume:** {int(row['Volume_TH']) * 1000}")
+    st.write(f"**Average Volume (Thousands):** {int(row['Volume_TH']):,}")
 
     # --- Growth & Fundamentals ---
     st.markdown("#### 📊 Growth & Fundamentals")
