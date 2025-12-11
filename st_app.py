@@ -160,7 +160,7 @@ sorted_df["Discount"] = sorted_df["discount"] * 100
 
 st.dataframe(
     sorted_df[
-        ['Symbol', 'Mentions', 'Unique Mentions', 'Sector', 'MarketCap_M', "Volume_TH", 'Target Price Change %', 'Discount']
+        ['Symbol', 'Sector', 'MarketCap_M', "Volume_TH", 'Target Price Change %', 'Discount', 'Mentions', 'Unique Mentions']
     ].reset_index(drop=True),
     use_container_width=True,
     column_config={
@@ -185,11 +185,12 @@ if selected_stock:
 
     st.markdown(f"### Details for {selected_stock}")
     st.write(f"**Sector:** {row['Sector']}")
-    st.write(f"**Mentions:** {row['Mentions']} (Unique: {row['Unique Mentions']})")
-    st.write(f"**% Change Since 1st Mention:** {row['%Change']:.2f}%")
+    # st.write(f"**Mentions:** {row['Mentions']} (Unique: {row['Unique Mentions']})")
+    # st.write(f"**% Change Since 1st Mention:** {row['%Change']:.2f}%")
     st.write(f"**Market Cap:** ${row['MarketCap']:,.2f}")
-    st.write(f"**SP Entrance Potential:** {row['SP_Potential']}/5")
-    st.write(f"**% Analysts Price Target Change (Week-Week)):** {row['Target Price Change %']:.2f}%")
+    # st.write(f"**SP Entrance Potential:** {row['SP_Potential']}/5")
+    st.write(f"**% Analysts Price Target Change (Week Over Week):** {row['Target Price Change %']:.2f}%")
+    st.write(f"**Average Volume (In Thousands):** {row['Volume_TH']}")
 
     # --- Growth & Fundamentals ---
     st.markdown("#### 📊 Growth & Fundamentals")
@@ -223,7 +224,7 @@ if selected_stock:
             row.get('earnings_based_valuation')) else "Earnings-based: N/A")
         st.write(f"**Target Price × Analyst Multiplier:** ${row.get('target_mean_price_adjusted'):.2f}" if pd.notnull(
             row.get('target_mean_price_adjusted')) else "Target × Analyst: N/A")
-        st.write(f"**Discount from Current Price:** {row['discount']:.1%}")
+        st.write(f"**Difference from Current Price:** {row['discount']:.1%}")
     else:
         st.write("Intrinsic valuation data not available.")
 
