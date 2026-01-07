@@ -326,7 +326,7 @@ if selected_stock:
 
 st.markdown(
     """
-    <a href="mailto:gadmiller7@gmaik.com?subject=Contact%20from%20Streamlit%20App">
+    <a href="mailto:gadmiller7@gmail.com?subject=Contact%20from%20Streamlit%20App">
         <button style="
             padding:10px 20px;
             border:none;
