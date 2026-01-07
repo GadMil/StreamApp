@@ -183,7 +183,7 @@ if selected_stock:
         f"[📊 Yahoo Finance Analysis for {selected_stock}](https://finance.yahoo.com/quote/{selected_stock.split('$')[1]}/)",
         unsafe_allow_html=True)
     st.markdown(
-        f"[🧾 Insider trading for {selected_stock}](http://openinsider.com/search?q={selected_stock.split('$')[1]}/)",
+        f"[🧾 Insider Trading for {selected_stock}](http://openinsider.com/search?q={selected_stock.split('$')[1]}/)",
         unsafe_allow_html=True)
 
     st.markdown(f"### Details for {selected_stock}")
