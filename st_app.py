@@ -182,6 +182,9 @@ if selected_stock:
     st.markdown(
         f"[📊 Yahoo Finance Analysis for {selected_stock}](https://finance.yahoo.com/quote/{selected_stock.split('$')[1]}/)",
         unsafe_allow_html=True)
+    st.markdown(
+        f"[🧾 Insider trading for {selected_stock}](http://openinsider.com/search?q={selected_stock.split('$')[1]}/)",
+        unsafe_allow_html=True)
 
     st.markdown(f"### Details for {selected_stock}")
     st.write(f"**Sector:** {row['Sector']}")
@@ -321,3 +324,21 @@ if selected_stock:
 
     show_price_chart(prices, days)
 
+st.markdown(
+    """
+    <a href="mailto:gadmiller7@gmaik.com?subject=Contact%20from%20Streamlit%20App">
+        <button style="
+            padding:10px 20px;
+            border:none;
+            border-radius:8px;
+            background-color:#4CAF50;
+            color:white;
+            font-size:16px;
+            cursor:pointer;
+        ">
+            📬 Contact Us
+        </button>
+    </a>
+    """,
+    unsafe_allow_html=True
+)
