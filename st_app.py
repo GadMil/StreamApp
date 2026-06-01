@@ -140,6 +140,19 @@ min_margin = st.sidebar.number_input(
 
 sector_options = st.sidebar.multiselect("Sectors", stocks_df['Sector'].dropna().unique())
 
+valuation_above_target_only = st.sidebar.checkbox(
+    "Earnings valuation > adjusted target price",
+    value=False,
+)
+
+sp_potential_range = st.sidebar.slider(
+    "SP Potential",
+    min_value=1,
+    max_value=5,
+    value=(1, 5),
+    step=1,
+)
+
 # Filter data
 filtered = stocks_df[
     (stocks_df['Mentions'] >= min_mentions) &
@@ -147,8 +160,16 @@ filtered = stocks_df[
     (stocks_df['MarketCap_M'].between(min_input, max_input)) &
     (stocks_df['Volume_TH'].fillna(0).between(min_vol_th, max_vol_th)) &
     (stocks_df["Revenue Growth YoY"] >= min_rev_growth/100) &
-    (stocks_df["Profit Margin"] >= min_margin/100)
+    (stocks_df["Profit Margin"] >= min_margin/100) &
+    (stocks_df["SP_Potential"].fillna(0).between(sp_potential_range[0], sp_potential_range[1]))
 ]
+
+if valuation_above_target_only:
+    filtered = filtered[
+        (filtered["earnings_based_valuation"].notna()) &
+        (filtered["target_mean_price_adjusted"].notna()) &
+        (filtered["earnings_based_valuation"] > filtered["target_mean_price_adjusted"])
+    ]
 
 if sector_options:
     filtered = filtered[filtered['Sector'].isin(sector_options)]
