@@ -44,26 +44,49 @@ if not check_password():
 st.write("✅ Access granted!")
 
 
-def show_price_chart(prices, days):
+def show_price_chart(prices, days, milestones):
     if not prices or len(prices) < 2:
         st.write("No chart available.")
         return
 
+    visible_prices = prices[-days:]
+    price_dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=len(prices))
+    visible_dates = price_dates[-len(visible_prices):]
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        y=prices[-days:],
-        x=list(range(len(prices[-days:]))),
+        y=visible_prices,
+        x=visible_dates,
         mode="lines",
         line=dict(width=2, color="green" if prices[-1] >= prices[0] else "red"),
+        name="Price",
         showlegend=False
     ))
+
+    milestone_colors = ["#636EFA", "#EF553B", "#AB63FA", "#FFA15A", "#19D3F3"]
+    for (label, milestone_date), color in zip(milestones.items(), milestone_colors):
+        milestone_date = pd.to_datetime(milestone_date, errors="coerce")
+        if pd.isnull(milestone_date) or milestone_date < visible_dates[0] or milestone_date > visible_dates[-1]:
+            continue
+
+        nearest_index = price_dates.get_indexer([milestone_date], method="nearest")[0]
+        fig.add_trace(go.Scatter(
+            x=[price_dates[nearest_index]],
+            y=[prices[nearest_index]],
+            mode="markers",
+            marker=dict(size=10, color=color, line=dict(width=1, color="white")),
+            name=label,
+            hovertemplate=f"<b>{label}</b><br>%{{x|%Y-%m-%d}}<br>$%{{y:.2f}}<extra></extra>"
+        ))
+
     fig.update_layout(
         height=250,
         margin=dict(l=20, r=20, t=20, b=20),
-        xaxis=dict(title="Days", showgrid=False),
+        xaxis=dict(title="Date", showgrid=False),
         yaxis=dict(title="Price", showgrid=True),
         plot_bgcolor="white",
-        paper_bgcolor="white"
+        paper_bgcolor="white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -193,6 +216,62 @@ st.dataframe(
         "Discount": st.column_config.NumberColumn(format="%.1f%%")
     }
 )
+
+# --- Opportunity Map ---
+show_opportunity_map = st.toggle("Show Opportunity Map", value=True)
+if show_opportunity_map:
+    st.subheader("Opportunity Map")
+    map_df = filtered.dropna(subset=["discount", "Revenue Growth YoY", "MarketCap"]).copy()
+
+    if map_df.empty:
+        st.info("No stocks with sufficient valuation, growth, and market-cap data match the filters.")
+    else:
+        map_df["Discount %"] = map_df["discount"] * 100
+        map_df["Revenue Growth %"] = map_df["Revenue Growth YoY"] * 100
+        market_cap_scale = np.sqrt(map_df["MarketCap"].clip(lower=0))
+        market_cap_range = market_cap_scale.max() - market_cap_scale.min()
+        map_df["Bubble Size"] = (
+            18 if market_cap_range == 0
+            else 8 + 32 * (market_cap_scale - market_cap_scale.min()) / market_cap_range
+        )
+
+        opportunity_fig = go.Figure()
+        for sector, sector_df in map_df.groupby("Sector", dropna=False):
+            opportunity_fig.add_trace(go.Scatter(
+                x=sector_df["Discount %"],
+                y=sector_df["Revenue Growth %"],
+                mode="markers",
+                name=sector if pd.notnull(sector) else "Unknown",
+                text=sector_df["Symbol"],
+                customdata=np.column_stack((
+                    sector_df["MarketCap"] / 1e6,
+                    sector_df["Mentions"],
+                    sector_df["Unique Mentions"]
+                )),
+                marker=dict(size=sector_df["Bubble Size"], opacity=0.7),
+                hovertemplate=(
+                    "<b>%{text}</b><br>"
+                    "Discount: %{x:.1f}%<br>"
+                    "Revenue Growth: %{y:.1f}%<br>"
+                    "Market Cap: $%{customdata[0]:,.0f}M<br>"
+                    "Mentions: %{customdata[1]:.0f} (%{customdata[2]:.0f} unique)"
+                    "<extra></extra>"
+                )
+            ))
+
+        opportunity_fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="gray")
+        opportunity_fig.add_vline(x=0, line_width=1, line_dash="dot", line_color="gray")
+        x_range = np.nanpercentile(map_df["Discount %"], [1, 99])
+        y_range = np.nanpercentile(map_df["Revenue Growth %"], [1, 99])
+        opportunity_fig.update_layout(
+            height=500,
+            xaxis=dict(title="Valuation Discount (%)", range=x_range),
+            yaxis=dict(title="Revenue Growth YoY (%)", range=y_range),
+            legend_title="Sector",
+            margin=dict(l=20, r=20, t=20, b=20)
+        )
+        st.caption("Upper-right stocks combine stronger revenue growth with a larger estimated valuation discount. Bubble size represents market cap; the initial view excludes extreme outliers.")
+        st.plotly_chart(opportunity_fig, use_container_width=True)
 
 # Detail panel
 selected_stock = st.selectbox("Select a stock for details", filtered['Symbol'].unique())
@@ -343,7 +422,14 @@ if selected_stock:
     else:
         prices = raw_prices
 
-    show_price_chart(prices, days)
+    mention_milestones = {
+        "First Mention": row.get("First Mention"),
+        "2nd Mention": row.get("2 Mention"),
+        "2nd Unique Mention": row.get("2 Unique Mention"),
+        "3rd Mention": row.get("3 Mention"),
+        "3rd Unique Mention": row.get("3 Unique Mention")
+    }
+    show_price_chart(prices, days, mention_milestones)
 
 st.markdown(
     """
