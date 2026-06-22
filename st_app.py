@@ -14,6 +14,199 @@ import pandas as pd
 import plotly.graph_objects as go
 import ast
 
+st.set_page_config(page_title="FinTweet Stock Picker", layout="wide")
+
+
+SWING_COLUMNS = [
+    "Swing Score",
+    "Swing Thesis",
+    "Range Low",
+    "Range Mid",
+    "Range High",
+    "Range Position",
+    "Upside To Range High %",
+    "Downside To Range Low %",
+    "Low Touches",
+    "High Touches",
+    "Rebound Count",
+]
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def parse_price_history(raw_history):
+    if raw_history is None or (isinstance(raw_history, float) and pd.isna(raw_history)):
+        return [], None
+
+    if isinstance(raw_history, str):
+        try:
+            raw_history = ast.literal_eval(raw_history)
+        except (ValueError, SyntaxError):
+            return [], None
+
+    price_dates = None
+    if isinstance(raw_history, dict):
+        price_dates = raw_history.get("dates")
+        raw_history = raw_history.get("close", raw_history.get("prices", []))
+
+    if not isinstance(raw_history, (list, tuple)):
+        return [], price_dates
+
+    prices = pd.to_numeric(pd.Series(raw_history), errors="coerce").dropna().tolist()
+    return prices, price_dates
+
+
+def count_zone_touches(prices, level, tolerance):
+    if len(prices) == 0 or pd.isna(level) or pd.isna(tolerance):
+        return 0
+
+    in_zone = (prices >= level - tolerance) & (prices <= level + tolerance)
+    if len(in_zone) == 0:
+        return 0
+
+    shifted = np.r_[False, in_zone[:-1]]
+    return int((in_zone & ~shifted).sum())
+
+
+def count_rebounds(prices, support, midpoint, tolerance):
+    if len(prices) == 0 or pd.isna(support) or pd.isna(midpoint):
+        return 0
+
+    armed = False
+    rebounds = 0
+    for price in prices:
+        if price <= support + tolerance:
+            armed = True
+        elif armed and price >= midpoint:
+            rebounds += 1
+            armed = False
+
+    return rebounds
+
+
+def classify_swing_setup(range_position, current, range_low, range_high, low_touches, rebound_count):
+    if pd.isna(range_position):
+        return "No Price History"
+    if current < range_low * 0.97:
+        return "Broken Range"
+    if range_position <= 0.35 and low_touches >= 2 and rebound_count >= 1:
+        return "Near Support"
+    if range_position <= 0.45:
+        return "Rebound Starting"
+    if range_position >= 0.80:
+        return "Near Resistance"
+    return "Middle of Range"
+
+
+def compute_swing_metrics(row, lookback_days=180):
+    prices, _ = parse_price_history(row.get("Price History"))
+    if len(prices) < 60:
+        return pd.Series({
+            "Swing Score": 0,
+            "Swing Thesis": "No Price History",
+            "Range Low": np.nan,
+            "Range Mid": np.nan,
+            "Range High": np.nan,
+            "Range Position": np.nan,
+            "Upside To Range High %": np.nan,
+            "Downside To Range Low %": np.nan,
+            "Low Touches": 0,
+            "High Touches": 0,
+            "Rebound Count": 0,
+        })
+
+    recent = pd.Series(prices[-lookback_days:], dtype="float64").dropna()
+    current = float(recent.iloc[-1])
+    range_low = float(recent.quantile(0.10))
+    range_high = float(recent.quantile(0.90))
+    range_width = range_high - range_low
+
+    if current <= 0 or range_width <= 0:
+        range_position = np.nan
+        upside = np.nan
+        downside = np.nan
+        low_touches = 0
+        high_touches = 0
+        rebound_count = 0
+        swing_score = 0
+        thesis = "Too Messy"
+        range_mid = np.nan
+    else:
+        range_mid = (range_low + range_high) / 2
+        range_position = clamp((current - range_low) / range_width, 0, 1.5)
+        upside = (range_high - current) / current
+        downside = (current - range_low) / current
+        tolerance = max(range_width * 0.08, current * 0.015)
+        low_touches = count_zone_touches(recent.values, range_low, tolerance)
+        high_touches = count_zone_touches(recent.values, range_high, tolerance)
+        rebound_count = count_rebounds(recent.values, range_low, range_mid, tolerance)
+        range_width_pct = range_width / current
+
+        range_quality = clamp((low_touches + high_touches + rebound_count) / 7, 0, 1)
+        setup_quality = clamp((0.45 - range_position) / 0.45, 0, 1)
+        upside_quality = clamp(upside / 0.35, 0, 1)
+        downside_quality = clamp(1 - max(downside, 0) / 0.18, 0, 1)
+        volatility_quality = clamp((range_width_pct - 0.12) / 0.45, 0, 1)
+
+        rsi = pd.to_numeric(pd.Series([row.get("RSI")]), errors="coerce").iloc[0]
+        macd_diff = pd.to_numeric(pd.Series([row.get("MACD Diff")]), errors="coerce").iloc[0]
+        discount = pd.to_numeric(pd.Series([row.get("discount")]), errors="coerce").iloc[0]
+        target_change = pd.to_numeric(pd.Series([row.get("Target Price Change %")]), errors="coerce").iloc[0]
+        mentions = pd.to_numeric(pd.Series([row.get("Mentions")]), errors="coerce").fillna(0).iloc[0]
+        unique_mentions = pd.to_numeric(pd.Series([row.get("Unique Mentions")]), errors="coerce").fillna(0).iloc[0]
+
+        technical_quality = 0.45
+        if pd.notna(rsi):
+            technical_quality += 0.25 if 30 <= rsi <= 60 else (-0.15 if rsi > 72 else 0.05)
+        if pd.notna(macd_diff) and macd_diff >= 0:
+            technical_quality += 0.15
+        technical_quality = clamp(technical_quality, 0, 1)
+
+        social_quality = clamp((np.log1p(mentions) / np.log1p(25)) * 0.6 + (unique_mentions / 5) * 0.4, 0, 1)
+
+        sanity_quality = 0.45
+        if pd.notna(discount) and discount > 0:
+            sanity_quality += 0.25
+        if pd.notna(target_change) and target_change >= 0:
+            sanity_quality += 0.15
+        elif pd.notna(target_change) and target_change < -10:
+            sanity_quality -= 0.20
+        sanity_quality = clamp(sanity_quality, 0, 1)
+
+        swing_score = round(100 * (
+            0.25 * range_quality +
+            0.20 * setup_quality +
+            0.15 * upside_quality +
+            0.10 * downside_quality +
+            0.10 * volatility_quality +
+            0.10 * technical_quality +
+            0.05 * social_quality +
+            0.05 * sanity_quality
+        ))
+        thesis = classify_swing_setup(range_position, current, range_low, range_high, low_touches, rebound_count)
+
+        if thesis == "Broken Range":
+            swing_score = min(swing_score, 35)
+        elif thesis == "Near Resistance":
+            swing_score = min(swing_score, 55)
+
+    return pd.Series({
+        "Swing Score": int(swing_score),
+        "Swing Thesis": thesis,
+        "Range Low": range_low,
+        "Range Mid": range_mid,
+        "Range High": range_high,
+        "Range Position": range_position,
+        "Upside To Range High %": upside * 100 if pd.notna(upside) else np.nan,
+        "Downside To Range Low %": downside * 100 if pd.notna(downside) else np.nan,
+        "Low Touches": low_touches,
+        "High Touches": high_touches,
+        "Rebound Count": rebound_count,
+    })
+
+
 def check_password():
     """Returns `True` if the user entered the correct password."""
     def password_entered():
@@ -44,13 +237,16 @@ if not check_password():
 st.write("✅ Access granted!")
 
 
-def show_price_chart(prices, days, milestones):
+def show_price_chart(prices, days, milestones, swing_levels=None, price_dates=None):
     if not prices or len(prices) < 2:
         st.write("No chart available.")
         return
 
     visible_prices = prices[-days:]
-    price_dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=len(prices))
+    if price_dates:
+        price_dates = pd.DatetimeIndex(pd.to_datetime(price_dates[-len(prices):], errors="coerce"))
+    else:
+        price_dates = pd.bdate_range(end=pd.Timestamp.today().normalize(), periods=len(prices))
     visible_dates = price_dates[-len(visible_prices):]
 
     fig = go.Figure()
@@ -70,6 +266,8 @@ def show_price_chart(prices, days, milestones):
             continue
 
         nearest_index = price_dates.get_indexer([milestone_date], method="nearest")[0]
+        if nearest_index < 0 or nearest_index >= len(prices):
+            continue
         fig.add_trace(go.Scatter(
             x=[price_dates[nearest_index]],
             y=[prices[nearest_index]],
@@ -78,6 +276,24 @@ def show_price_chart(prices, days, milestones):
             name=label,
             hovertemplate=f"<b>{label}</b><br>%{{x|%Y-%m-%d}}<br>$%{{y:.2f}}<extra></extra>"
         ))
+
+    if swing_levels:
+        level_styles = {
+            "Range Low": dict(color="#2ca02c", dash="dash"),
+            "Range Mid": dict(color="#7f7f7f", dash="dot"),
+            "Range High": dict(color="#d62728", dash="dash"),
+        }
+        for label, level in swing_levels.items():
+            if pd.notna(level):
+                style = level_styles.get(label, dict(color="gray", dash="dot"))
+                fig.add_hline(
+                    y=level,
+                    line_width=1,
+                    line_dash=style["dash"],
+                    line_color=style["color"],
+                    annotation_text=label,
+                    annotation_position="top left"
+                )
 
     fig.update_layout(
         height=250,
@@ -95,9 +311,18 @@ def show_price_chart(prices, days, milestones):
 # Load your ranked stock data
 stocks_df = pd.read_csv("Detailed Stocks.csv")
 
-st.set_page_config(page_title="FinTweet Stock Picker", layout="wide")
+if not set(SWING_COLUMNS).issubset(stocks_df.columns):
+    stocks_df = stocks_df.drop(columns=[col for col in SWING_COLUMNS if col in stocks_df.columns], errors="ignore")
+    swing_metrics_df = stocks_df.apply(compute_swing_metrics, axis=1)
+    stocks_df = pd.concat([stocks_df, swing_metrics_df], axis=1)
 
 st.title("📈 FinTweet-Based Stock Ranking UI")
+
+view_mode = st.radio(
+    "View",
+    ["Stock Ranking", "Swing Setups"],
+    horizontal=True,
+)
 
 # --- Sidebar Filters ---
 st.sidebar.header("Filter Options")
@@ -176,6 +401,12 @@ sp_potential_range = st.sidebar.slider(
     step=1,
 )
 
+st.sidebar.header("Swing Setup Filters")
+min_swing_score = st.sidebar.slider("Minimum Swing Score", 0, 100, 60)
+max_range_position = st.sidebar.slider("Max Range Position", 0.0, 1.0, 0.35, step=0.05)
+min_upside_to_range_high = st.sidebar.slider("Minimum Upside to Range High (%)", 0, 200, 20, step=5)
+only_undervalued_swing = st.sidebar.checkbox("Only undervalued swing setups", value=False)
+
 # Filter data
 filtered = stocks_df[
     (stocks_df['Mentions'] >= min_mentions) &
@@ -198,27 +429,78 @@ if sector_options:
     filtered = filtered[filtered['Sector'].isin(sector_options)]
 
 # --- Main View ---
-st.subheader("Top Stocks (Filtered)")
-sorted_df = filtered.copy()
-sorted_df["Discount"] = sorted_df["discount"] * 100
+if view_mode == "Swing Setups":
+    st.subheader("Swing Setups")
+    swing_df = filtered[
+        (filtered["Swing Score"].fillna(0) >= min_swing_score) &
+        (filtered["Range Position"].fillna(9) <= max_range_position) &
+        (filtered["Upside To Range High %"].fillna(0) >= min_upside_to_range_high)
+    ].copy()
 
-st.dataframe(
-    sorted_df[
-        ['Symbol', 'Sector', 'MarketCap_M', "Volume_TH", 'Target Price Change %', 'Discount', 'Mentions', 'Unique Mentions']
-    ].reset_index(drop=True),
-    use_container_width=True,
-    column_config={
-        "MarketCap_M": st.column_config.NumberColumn(
-            "Market Cap (M$)", format="%d"
-        ),
-        "Volume_TH": st.column_config.NumberColumn("Volume (Thousands)", format="%d"),
-        "Target Price Change %": st.column_config.NumberColumn("TP Change %", format="%.1f%%"),
-        "Discount": st.column_config.NumberColumn(format="%.1f%%")
-    }
-)
+    if only_undervalued_swing:
+        swing_df = swing_df[swing_df["discount"].fillna(-1) > 0]
+
+    swing_df["Discount"] = swing_df["discount"] * 100
+    swing_df = swing_df.sort_values(
+        ["Swing Score", "Upside To Range High %", "Rebound Count"],
+        ascending=[False, False, False],
+    )
+
+    if swing_df.empty:
+        st.info("No swing setups match the current filters.")
+    else:
+        st.dataframe(
+            swing_df[
+                [
+                    "Symbol",
+                    "Sector",
+                    "Swing Score",
+                    "Swing Thesis",
+                    "Price",
+                    "Range Position",
+                    "Upside To Range High %",
+                    "Downside To Range Low %",
+                    "Low Touches",
+                    "High Touches",
+                    "Rebound Count",
+                    "Mentions",
+                    "Unique Mentions",
+                    "RSI",
+                    "Discount",
+                ]
+            ].reset_index(drop=True),
+            use_container_width=True,
+            column_config={
+                "Swing Score": st.column_config.ProgressColumn("Swing Score", min_value=0, max_value=100),
+                "Range Position": st.column_config.NumberColumn(format="%.2f"),
+                "Upside To Range High %": st.column_config.NumberColumn("Upside to Range High", format="%.1f%%"),
+                "Downside To Range Low %": st.column_config.NumberColumn("Downside to Range Low", format="%.1f%%"),
+                "RSI": st.column_config.NumberColumn(format="%.1f"),
+                "Discount": st.column_config.NumberColumn(format="%.1f%%"),
+            }
+        )
+else:
+    st.subheader("Top Stocks (Filtered)")
+    sorted_df = filtered.copy()
+    sorted_df["Discount"] = sorted_df["discount"] * 100
+
+    st.dataframe(
+        sorted_df[
+            ['Symbol', 'Sector', 'MarketCap_M', "Volume_TH", 'Target Price Change %', 'Discount', 'Mentions', 'Unique Mentions']
+        ].reset_index(drop=True),
+        use_container_width=True,
+        column_config={
+            "MarketCap_M": st.column_config.NumberColumn(
+                "Market Cap (M$)", format="%d"
+            ),
+            "Volume_TH": st.column_config.NumberColumn("Volume (Thousands)", format="%d"),
+            "Target Price Change %": st.column_config.NumberColumn("TP Change %", format="%.1f%%"),
+            "Discount": st.column_config.NumberColumn(format="%.1f%%")
+        }
+    )
 
 # --- Opportunity Map ---
-show_opportunity_map = st.toggle("Show Opportunity Map", value=True)
+show_opportunity_map = st.toggle("Show Opportunity Map", value=(view_mode == "Stock Ranking"))
 if show_opportunity_map:
     st.subheader("Opportunity Map")
     map_df = filtered.dropna(subset=["discount", "Revenue Growth YoY", "MarketCap"]).copy()
@@ -274,9 +556,14 @@ if show_opportunity_map:
         st.plotly_chart(opportunity_fig, use_container_width=True)
 
 # Detail panel
-selected_stock = st.selectbox("Select a stock for details", filtered['Symbol'].unique())
+detail_df = swing_df if view_mode == "Swing Setups" and "swing_df" in locals() and not swing_df.empty else filtered
+selected_stock = None
+if detail_df.empty:
+    st.info("No stocks are available for the detail panel with the current filters.")
+else:
+    selected_stock = st.selectbox("Select a stock for details", detail_df['Symbol'].unique())
 if selected_stock:
-    row = filtered[filtered['Symbol'] == selected_stock].iloc[0]
+    row = detail_df[detail_df['Symbol'] == selected_stock].iloc[0]
 
     st.markdown("#### 🔗 External Links")
     st.markdown(
@@ -376,6 +663,17 @@ if selected_stock:
         elif ma50 < ma200:
             st.warning("📉 Bearish crossover: 50d MA is below 200d MA")
 
+    st.markdown("#### Swing Setup")
+    if pd.notnull(row.get("Swing Score")):
+        st.write(f"**Swing Score:** {int(row.get('Swing Score'))}/100")
+        st.write(f"**Swing Thesis:** {row.get('Swing Thesis')}")
+        st.write(f"**Range Position:** {row.get('Range Position'):.2f}" if pd.notnull(row.get("Range Position")) else "Range Position: N/A")
+        st.write(f"**Upside to Range High:** {row.get('Upside To Range High %'):.1f}%" if pd.notnull(row.get("Upside To Range High %")) else "Upside to Range High: N/A")
+        st.write(f"**Downside to Range Low:** {row.get('Downside To Range Low %'):.1f}%" if pd.notnull(row.get("Downside To Range Low %")) else "Downside to Range Low: N/A")
+        st.write(f"**Touches:** {int(row.get('Low Touches', 0))} low / {int(row.get('High Touches', 0))} high")
+    else:
+        st.write("Swing setup data not available.")
+
     # st.markdown("#### 🧠 Ryshab Score")
     #
     # score = row.get("Ryshab Score")
@@ -401,26 +699,8 @@ if selected_stock:
     time_range = st.selectbox("Select time range", ["2 months", "6 months", "1 year"])
     days = {"2 months": 60, "6 months": 180, "1 year": 365}[time_range]
 
-    # Filter price history
-    price_history = row.get("Price History", [])
-    if isinstance(price_history, str):
-        import ast
-
-        price_history = ast.literal_eval(price_history)
-
-    # Only keep the last N days
-    if isinstance(price_history, list) and len(price_history) > days:
-        price_history = price_history[-days:]
-
     st.markdown("#### 📈 Price Chart")
-    raw_prices = row.get("Price History")
-    if isinstance(raw_prices, str):
-        try:
-            prices = ast.literal_eval(raw_prices)
-        except:
-            prices = []
-    else:
-        prices = raw_prices
+    prices, price_dates = parse_price_history(row.get("Price History"))
 
     mention_milestones = {
         "First Mention": row.get("First Mention"),
@@ -429,7 +709,12 @@ if selected_stock:
         "3rd Mention": row.get("3 Mention"),
         "3rd Unique Mention": row.get("3 Unique Mention")
     }
-    show_price_chart(prices, days, mention_milestones)
+    swing_levels = {
+        "Range Low": row.get("Range Low"),
+        "Range Mid": row.get("Range Mid"),
+        "Range High": row.get("Range High"),
+    }
+    show_price_chart(prices, days, mention_milestones, swing_levels=swing_levels, price_dates=price_dates)
 
 st.markdown(
     """
