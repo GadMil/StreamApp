@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import ast
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -24,12 +25,44 @@ DATA_FILE = Path(__file__).with_name("Detailed Stocks.csv")
 MANUAL_LAST_UPDATED = None
 
 
-def get_last_updated():
+def get_last_updated(stocks_df):
     if MANUAL_LAST_UPDATED:
         return MANUAL_LAST_UPDATED
 
-    modified_at = datetime.fromtimestamp(DATA_FILE.stat().st_mtime).astimezone()
-    return modified_at.strftime("%B %d, %Y at %H:%M %Z")
+    # Files are copied when Streamlit deploys the app, so their filesystem mtime
+    # describes the deployment rather than the data refresh. The commit timestamp
+    # is stable across app restarts and changes when the CSV is committed again.
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cI", "--", DATA_FILE.name],
+            cwd=DATA_FILE.parent,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=2,
+        )
+        committed_at = datetime.fromisoformat(result.stdout.strip())
+        return committed_at.strftime("%B %d, %Y at %H:%M %Z")
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        pass
+
+    # Some deployment environments omit .git. In that case, report the newest
+    # observation stored in Price History instead of using an unreliable mtime.
+    latest_observation = None
+    for raw_history in stocks_df.get("Price History", []):
+        _, price_dates = parse_price_history(raw_history)
+        if price_dates:
+            parsed_dates = pd.to_datetime(price_dates, errors="coerce")
+            valid_dates = parsed_dates[~pd.isna(parsed_dates)]
+            if len(valid_dates):
+                row_latest = valid_dates.max()
+                if latest_observation is None or row_latest > latest_observation:
+                    latest_observation = row_latest
+
+    if latest_observation is not None:
+        return latest_observation.strftime("%B %d, %Y")
+
+    return "Unknown"
 
 
 SWING_COLUMNS = [
@@ -333,7 +366,7 @@ if not set(SWING_COLUMNS).issubset(stocks_df.columns):
 
 st.title("📈 FinTweet-Based Stock Ranking UI")
 
-st.caption(f"Data last updated: {get_last_updated()}")
+st.caption(f"Data last updated: {get_last_updated(stocks_df)}")
 
 view_mode = st.radio(
     "View",
