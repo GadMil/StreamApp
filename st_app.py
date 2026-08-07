@@ -13,8 +13,23 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import ast
+from datetime import datetime
+from pathlib import Path
 
 st.set_page_config(page_title="FinTweet Stock Picker", layout="wide")
+
+
+DATA_FILE = Path(__file__).with_name("Detailed Stocks.csv")
+# Set this to text such as "August 7, 2026" to replace the automatic file date.
+MANUAL_LAST_UPDATED = None
+
+
+def get_last_updated():
+    if MANUAL_LAST_UPDATED:
+        return MANUAL_LAST_UPDATED
+
+    modified_at = datetime.fromtimestamp(DATA_FILE.stat().st_mtime).astimezone()
+    return modified_at.strftime("%B %d, %Y at %H:%M %Z")
 
 
 SWING_COLUMNS = [
@@ -309,7 +324,7 @@ def show_price_chart(prices, days, milestones, swing_levels=None, price_dates=No
 
 
 # Load your ranked stock data
-stocks_df = pd.read_csv("Detailed Stocks.csv")
+stocks_df = pd.read_csv(DATA_FILE)
 
 if not set(SWING_COLUMNS).issubset(stocks_df.columns):
     stocks_df = stocks_df.drop(columns=[col for col in SWING_COLUMNS if col in stocks_df.columns], errors="ignore")
@@ -317,6 +332,8 @@ if not set(SWING_COLUMNS).issubset(stocks_df.columns):
     stocks_df = pd.concat([stocks_df, swing_metrics_df], axis=1)
 
 st.title("📈 FinTweet-Based Stock Ranking UI")
+
+st.caption(f"Data last updated: {get_last_updated()}")
 
 view_mode = st.radio(
     "View",
@@ -345,6 +362,34 @@ max_input = st.sidebar.number_input(
     value=max_cap_m,
     min_value=min_input,
     step=10,
+)
+
+pe_values = pd.to_numeric(stocks_df["PE Ratio"], errors="coerce").replace([np.inf, -np.inf], np.nan)
+forward_pe_values = pd.to_numeric(stocks_df["Forward PE"], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
+pe_bounds = (
+    float(np.floor(pe_values.min(skipna=True))),
+    float(np.ceil(pe_values.max(skipna=True))),
+)
+forward_pe_bounds = (
+    float(np.floor(forward_pe_values.min(skipna=True))),
+    float(np.ceil(forward_pe_values.max(skipna=True))),
+)
+
+pe_range = st.sidebar.slider(
+    "P/E Range",
+    min_value=pe_bounds[0],
+    max_value=pe_bounds[1],
+    value=pe_bounds,
+    step=1.0,
+)
+forward_pe_range = st.sidebar.slider(
+    "Future P/E Range",
+    min_value=forward_pe_bounds[0],
+    max_value=forward_pe_bounds[1],
+    value=forward_pe_bounds,
+    step=1.0,
+    help="Uses the Forward PE value from the CSV.",
 )
 
 stocks_df['Volume_TH'] = (stocks_df['Volume']).astype(float) / 1e3  # in thousands of shares
@@ -408,10 +453,20 @@ min_upside_to_range_high = st.sidebar.slider("Minimum Upside to Range High (%)",
 only_undervalued_swing = st.sidebar.checkbox("Only undervalued swing setups", value=False)
 
 # Filter data
+pe_matches = pd.Series(True, index=stocks_df.index)
+if pe_range != pe_bounds:
+    pe_matches = pe_values.between(pe_range[0], pe_range[1])
+
+forward_pe_matches = pd.Series(True, index=stocks_df.index)
+if forward_pe_range != forward_pe_bounds:
+    forward_pe_matches = forward_pe_values.between(forward_pe_range[0], forward_pe_range[1])
+
 filtered = stocks_df[
     (stocks_df['Mentions'] >= min_mentions) &
     (stocks_df['Unique Mentions'] >= min_unique_mentions) &
     (stocks_df['MarketCap_M'].between(min_input, max_input)) &
+    pe_matches &
+    forward_pe_matches &
     (stocks_df['Volume_TH'].fillna(0).between(min_vol_th, max_vol_th)) &
     (stocks_df["Revenue Growth YoY"] >= min_rev_growth/100) &
     (stocks_df["Profit Margin"] >= min_margin/100) &
